@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Feed Cleaner",
+  "version": "1.0",
+  "description": "Removes clutter from your LinkedIn feed, such as likes, comments, and follows.",
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "LinkedIn Feed Cleaner"
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
