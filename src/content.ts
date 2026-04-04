@@ -1,110 +1,118 @@
-type StorageChange = {
-    newValue?: boolean;
-    oldValue?: boolean;
-};
-
 let enableCleanFeed: boolean = false;
+let observerActive: boolean = false;
 
-const observer = new MutationObserver(removeContainersBasedOnHeader);
-
-// Utility to load settings from Chrome storage
-function loadSettings(): Promise<boolean> {
-    return new Promise((resolve) => {
-        chrome.storage.local.get('enableCleanFeed', (data) => {
-            resolve(data.enableCleanFeed || false);
-        });
-    });
-}
-
-
-// Listen for storage changes to apply updates dynamically
-chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.enableCleanFeed) {
-        enableCleanFeed = changes.enableCleanFeed.newValue;
-
-        if (enableCleanFeed) {
-            enableObserver();
-        } else {
-            disableObserver();
-        }
-    }
+const observer = new MutationObserver(() => {
+  removeSocialAndPromotedPosts();
 });
 
-// Utility to listen for changes in Chrome storage
-function listenForStorageChanges(): void {
-    chrome.storage.onChanged.addListener((changes, area) => {
-        if (area === 'local' && changes.enableCleanFeed) {
-            const change: StorageChange = changes.enableCleanFeed;
-            updateObserver(change.newValue || false);
-        }
-    });
+const ACTIVITY_PATTERN =
+  /\b(likes? this|loves? this|celebrates? this|supports? this|finds? this insightful|finds? this funny|commented on this|reposted this|repost this|shared this|follows?)\b/i;
+
+const EXACT_HEADER_LABELS = ["Recommended for you", "Suggested", "Promoted"];
+
+function getInnerWrapper(card: Element): Element | null {
+  const h2 = card.querySelector("h2");
+  if (!h2) return null;
+  return h2.parentElement;
 }
 
+function getSocialActivityText(card: Element): string | null {
+  const wrapper = getInnerWrapper(card);
+  if (!wrapper) {
+    console.log(`[LinkedIn Pure]   ↳ No inner wrapper (h2 not found)`);
+    return null;
+  }
 
-// Update observer based on the value of `enableCleanFeed`
-function updateObserver(shouldRemoveSuggested: boolean): void {
-    enableCleanFeed = shouldRemoveSuggested;
-    if (enableCleanFeed) {
-        enableObserver();
-    } else {
-        disableObserver();
+  const avatarStack = wrapper.querySelector("div._2f50fdd4");
+  if (!avatarStack) return null;
+
+  const activityP = avatarStack.querySelector("p[componentkey]");
+  if (!activityP) return null;
+
+  const text = activityP.textContent?.trim() ?? "";
+  if (text.length > 0) {
+    console.log(`[LinkedIn Pure]   ↳ Activity text: "${text}"`);
+  }
+  return text || null;
+}
+
+function removeSocialAndPromotedPosts(): void {
+  const cards = document.querySelectorAll<HTMLElement>('[role="listitem"]');
+  console.log(`[LinkedIn Pure] Scanning ${cards.length} listitem(s)...`);
+
+  cards.forEach((card, index) => {
+    if (card.dataset.lpHidden === "true") return;
+
+    const componentKey = card.getAttribute("componentkey") ?? "";
+    if (!componentKey.includes("FeedType_MAIN_FEED")) return;
+
+    console.log(
+      `[LinkedIn Pure] Card #${index} key="${componentKey.slice(0, 60)}..."`,
+    );
+
+    const activityText = getSocialActivityText(card);
+    if (activityText !== null) {
+      if (
+        ACTIVITY_PATTERN.test(activityText) ||
+        EXACT_HEADER_LABELS.includes(activityText)
+      ) {
+        card.style.display = "none";
+        card.dataset.lpHidden = "true";
+        console.log(`[LinkedIn Pure]   ✕ HIDDEN ("${activityText}")`);
+        return;
+      }
     }
+  });
 }
 
+function loadSettings(): Promise<boolean> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("enableCleanFeed", (data) => {
+      resolve(data.enableCleanFeed || false);
+    });
+  });
+}
 
-// Enable the MutationObserver
 function enableObserver(): void {
-    if (!observerIsActive()) {
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true,
-        });
-        removeContainersBasedOnHeader();
-        console.log('Observer enabled');
-    }
+  if (observerActive) return;
+  observerActive = true;
+  observer.observe(document.body, { childList: true, subtree: true });
+  removeSocialAndPromotedPosts();
+  console.log("[LinkedIn Pure] Observer enabled");
 }
 
-// Disable the MutationObserver
 function disableObserver(): void {
-    observer.disconnect();
-    console.log('Observer disabled');
-}
-
-// Check if the observer is already active
-function observerIsActive(): boolean {
-    return observer.takeRecords().length > 0; // Checks if there are pending mutation records
-}
-
-
-// Logic to remove elements
-async function removeContainersBasedOnHeader(): Promise<void> {
-    const impressionContainers: NodeListOf<HTMLElement> = document.querySelectorAll('.fie-impression-container');
-
-    impressionContainers.forEach((container) => {
-        // Check if the container has the target header element
-        const headerTextView = container.querySelector('.update-components-header__text-view');
-        if (headerTextView) {
-            const parentElement = container.closest('[data-view-name="feed-full-update"]');
-            if (parentElement) {
-                parentElement.remove(); // Remove the parent element
-                console.log('Removed parent container with class [data-view-name="feed-full-update"]".');
-            }
-        }
+  if (!observerActive) return;
+  observerActive = false;
+  observer.disconnect();
+  document
+    .querySelectorAll<HTMLElement>('[data-lp-hidden="true"]')
+    .forEach((card) => {
+      card.style.display = "";
+      delete card.dataset.lpHidden;
     });
+  console.log("[LinkedIn Pure] Observer disabled — all posts restored");
 }
 
-// Main function to initialize the script
-async function init(): Promise<void> {
-    try {
-        enableCleanFeed = await loadSettings();
-        if (enableCleanFeed) {
-            enableObserver();
-        }
-        listenForStorageChanges();
-    } catch (error) {
-        console.error('Error initializing the script:', error);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.enableCleanFeed) {
+    enableCleanFeed = changes.enableCleanFeed.newValue ?? false;
+    if (enableCleanFeed) {
+      enableObserver();
+    } else {
+      disableObserver();
     }
+  }
+});
+
+async function init(): Promise<void> {
+  try {
+    enableCleanFeed = await loadSettings();
+    console.log(`[LinkedIn Pure] Init — enableCleanFeed=${enableCleanFeed}`);
+    if (enableCleanFeed) enableObserver();
+  } catch (error) {
+    console.error("[LinkedIn Pure] Init error:", error);
+  }
 }
 
-// Run the script
 init();
