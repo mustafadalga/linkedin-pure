@@ -17,10 +17,11 @@ function App() {
     }, []);
 
     useEffect(() => {
+        if (!isInitialized) return;
         chrome.storage.local.set({ enableCleanFeed }, () => {
             console.log('State saved to storage:', enableCleanFeed);
         });
-    }, [ enableCleanFeed ]);
+    }, [enableCleanFeed, isInitialized]);
 
     if (!isInitialized) return null;
 
